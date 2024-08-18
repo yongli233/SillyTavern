@@ -92,6 +92,8 @@ async function parseCohereStream(jsonStream, request, response) {
         } else {
             return response.end();
         }
+    } finally {
+        controller.abort();
     }
 }
 
