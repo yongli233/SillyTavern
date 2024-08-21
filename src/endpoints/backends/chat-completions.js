@@ -189,6 +189,8 @@ async function sendClaudeRequest(request, response) {
         if (!response.headersSent) {
             return response.status(500).send({ error: true });
         }
+    } finally {
+        controller.abort();
     }
 }
 
@@ -241,6 +243,8 @@ async function sendScaleRequest(request, response) {
         if (!response.headersSent) {
             return response.status(500).send({ error: true });
         }
+    } finally {
+        controller.abort();
     }
 }
 
