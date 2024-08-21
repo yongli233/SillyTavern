@@ -110,15 +110,18 @@ async function sendClaudeRequest(request, response) {
         return response.status(400).send({ error: true });
     }
 
+    const controller = new AbortController(); // Declare the controller here
+
     try {
-        const controller = new AbortController();
         request.socket.removeAllListeners('close');
         request.socket.on('close', function () {
             controller.abort();
         });
+
         const additionalHeaders = {};
         let use_system_prompt = (request.body.model.startsWith('claude-2') || request.body.model.startsWith('claude-3')) && request.body.claude_use_sysprompt;
         let converted_prompt = convertClaudeMessages(request.body.messages, request.body.assistant_prefill, use_system_prompt, request.body.human_sysprompt_message, request.body.char_name, request.body.user_name);
+
         // Add custom stop sequences
         const stopSequences = [];
         if (Array.isArray(request.body.stop)) {
@@ -135,9 +138,11 @@ async function sendClaudeRequest(request, response) {
             top_k: request.body.top_k,
             stream: request.body.stream,
         };
+
         if (use_system_prompt) {
             requestBody.system = converted_prompt.systemPrompt;
         }
+
         if (Array.isArray(request.body.tools) && request.body.tools.length > 0) {
             // Claude doesn't do prefills on function calls, and doesn't allow empty messages
             if (converted_prompt.messages.length && converted_prompt.messages[converted_prompt.messages.length - 1].role === 'assistant') {
@@ -150,6 +155,7 @@ async function sendClaudeRequest(request, response) {
                 .map(tool => tool.function)
                 .map(fn => ({ name: fn.name, description: fn.description, input_schema: fn.parameters }));
         }
+
         console.log('Claude request:', requestBody);
 
         const generateResponse = await fetch(apiUrl + '/messages', {
