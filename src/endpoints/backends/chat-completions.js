@@ -110,18 +110,16 @@ async function sendClaudeRequest(request, response) {
         return response.status(400).send({ error: true });
     }
 
-    const controller = new AbortController(); // Declare the controller here
+    const controller = new AbortController();
+    request.socket.removeAllListeners('close');
+    request.socket.on('close', function () {
+        controller.abort();
+    });
 
     try {
-        request.socket.removeAllListeners('close');
-        request.socket.on('close', function () {
-            controller.abort();
-        });
-
         const additionalHeaders = {};
         let use_system_prompt = (request.body.model.startsWith('claude-2') || request.body.model.startsWith('claude-3')) && request.body.claude_use_sysprompt;
         let converted_prompt = convertClaudeMessages(request.body.messages, request.body.assistant_prefill, use_system_prompt, request.body.human_sysprompt_message, request.body.char_name, request.body.user_name);
-
         // Add custom stop sequences
         const stopSequences = [];
         if (Array.isArray(request.body.stop)) {
@@ -138,11 +136,9 @@ async function sendClaudeRequest(request, response) {
             top_k: request.body.top_k,
             stream: request.body.stream,
         };
-
         if (use_system_prompt) {
             requestBody.system = converted_prompt.systemPrompt;
         }
-
         if (Array.isArray(request.body.tools) && request.body.tools.length > 0) {
             // Claude doesn't do prefills on function calls, and doesn't allow empty messages
             if (converted_prompt.messages.length && converted_prompt.messages[converted_prompt.messages.length - 1].role === 'assistant') {
@@ -155,7 +151,6 @@ async function sendClaudeRequest(request, response) {
                 .map(tool => tool.function)
                 .map(fn => ({ name: fn.name, description: fn.description, input_schema: fn.parameters }));
         }
-
         console.log('Claude request:', requestBody);
 
         const generateResponse = await fetch(apiUrl + '/messages', {
@@ -172,8 +167,37 @@ async function sendClaudeRequest(request, response) {
         });
 
         if (request.body.stream) {
-            // Pipe remote SSE stream to Express response
-            forwardFetchResponse(generateResponse, response);
+            // Simulate premature abortion
+            let aborted = false;
+            const timeoutDuration = 10000; // 10 seconds
+            let timer = setTimeout(() => {
+                console.log('Simulating premature stream abortion.');
+                response.write('data: [DONE]\n\n');
+                response.end();
+                controller.abort();
+                aborted = true;
+            }, timeoutDuration);
+
+            generateResponse.body.on('data', (chunk) => {
+                if (!aborted) {
+                    response.write(chunk);
+                }
+            });
+
+            generateResponse.body.on('end', () => {
+                clearTimeout(timer);
+                if (!aborted) {
+                    console.log('Streaming request finished');
+                    response.write('data: [DONE]\n\n');
+                    response.end();
+                }
+            });
+
+            request.socket.on('close', function () {
+                clearTimeout(timer);
+                if (generateResponse.body instanceof Readable) generateResponse.body.destroy();
+                response.end();
+            });
         } else {
             if (!generateResponse.ok) {
                 console.log(color.red(`Claude API returned error: ${generateResponse.status} ${generateResponse.statusText}\n${await generateResponse.text()}\n${divider}`));
