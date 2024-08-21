@@ -112,16 +112,18 @@ async function sendClaudeRequest(request, response) {
         return response.status(400).send({ error: true });
     }
 
+    const controller = new AbortController();
+
     try {
-        const controller = new AbortController();
         request.socket.removeAllListeners('close');
         request.socket.on('close', function () {
             controller.abort();
         });
+
         const additionalHeaders = {};
         let use_system_prompt = (request.body.model.startsWith('claude-2') || request.body.model.startsWith('claude-3')) && request.body.claude_use_sysprompt;
         let converted_prompt = convertClaudeMessages(request.body.messages, request.body.assistant_prefill, use_system_prompt, request.body.human_sysprompt_message, request.body.char_name, request.body.user_name);
-        // Add custom stop sequences
+        
         const stopSequences = [];
         if (Array.isArray(request.body.stop)) {
             stopSequences.push(...request.body.stop);
@@ -137,11 +139,12 @@ async function sendClaudeRequest(request, response) {
             top_k: request.body.top_k,
             stream: request.body.stream,
         };
+
         if (use_system_prompt) {
             requestBody.system = converted_prompt.systemPrompt;
         }
+
         if (Array.isArray(request.body.tools) && request.body.tools.length > 0) {
-            // Claude doesn't do prefills on function calls, and doesn't allow empty messages
             if (converted_prompt.messages.length && converted_prompt.messages[converted_prompt.messages.length - 1].role === 'assistant') {
                 converted_prompt.messages.push({ role: 'user', content: '.' });
             }
@@ -168,7 +171,6 @@ async function sendClaudeRequest(request, response) {
         });
 
         if (request.body.stream) {
-            // Pipe remote SSE stream to Express response
             forwardFetchResponse(generateResponse, response);
         } else {
             if (!generateResponse.ok) {
@@ -180,7 +182,6 @@ async function sendClaudeRequest(request, response) {
             const responseText = generateResponseJson.content[0].text;
             console.log('Claude response:', generateResponseJson);
 
-            // Wrap it back to OAI format + save the original content
             const reply = { choices: [{ 'message': { 'content': responseText } }], content: generateResponseJson.content };
             return response.send(reply);
         }
@@ -189,8 +190,11 @@ async function sendClaudeRequest(request, response) {
         if (!response.headersSent) {
             return response.status(500).send({ error: true });
         }
+    } finally {
+        controller.abort();  // Ensure the controller is aborted and cleaned up
     }
 }
+
 
 /**
  * Sends a request to Scale Spellbook API.
